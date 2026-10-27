@@ -1,0 +1,134 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PRODUCER
+  ADMIN
+}
+
+enum Category {
+  MIEL
+  FROMAGE
+  VIANDE
+  TEXTILE
+  CHAMPIGNONS
+  AUTRE
+}
+
+/// Ce que le public peut voir du producteur. Choisi par le producteur lui-même.
+enum Visibility {
+  /// Nom, adresse exacte et coordonnées visibles.
+  PUBLIC
+  /// Nom visible, position floutée (~1 km), adresse et contacts masqués.
+  APPROXIMATE
+  /// Nom remplacé par un pseudonyme, seule la commune est indiquée.
+  ANONYMOUS
+}
+
+enum ProducerStatus {
+  /// Inscrit, en attente de validation par un administrateur.
+  PENDING
+  APPROVED
+  SUSPENDED
+}
+
+enum StockStatus {
+  AVAILABLE
+  LOW
+  OUT_OF_STOCK
+  OUT_OF_SEASON
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(PRODUCER)
+  createdAt    DateTime  @default(now())
+  producer     Producer?
+}
+
+model Producer {
+  id          String           @id @default(cuid())
+  userId      String           @unique
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  category    Category
+  description String           @default("")
+  /// Commune de la vallée (voir src/lib/communes.ts).
+  commune     String
+  address     String           @default("")
+  /// Position exacte. Jamais envoyée au navigateur si visibility != PUBLIC.
+  latitude    Float?
+  longitude   Float?
+  phone       String           @default("")
+  email       String           @default("")
+  website     String           @default("")
+  /// Jours et horaires où l'on peut venir chercher les produits.
+  pickupInfo  String           @default("")
+  visibility  Visibility       @default(APPROXIMATE)
+  status      ProducerStatus   @default(PENDING)
+  /// Fermeture temporaire (congés, fin de saison…), avec un message optionnel.
+  closed      Boolean          @default(false)
+  closedNote  String           @default("")
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  products    Product[]
+  relayPoints RelayPoint[]
+  messages    ContactMessage[]
+
+  @@index([status])
+}
+
+model Product {
+  id          String      @id @default(cuid())
+  producerId  String
+  producer    Producer    @relation(fields: [producerId], references: [id], onDelete: Cascade)
+  name        String
+  description String      @default("")
+  /// Ex. « le pot de 500 g », « le kg ».
+  unit        String      @default("")
+  /// Prix en centimes ; null = prix sur demande.
+  priceCents  Int?
+  stockStatus StockStatus @default(AVAILABLE)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([producerId])
+}
+
+/// Lieu de dépôt où les clients peuvent retirer les produits (marché, commerce, office de tourisme…).
+model RelayPoint {
+  id           String     @id @default(cuid())
+  name         String
+  address      String
+  commune      String
+  latitude     Float
+  longitude    Float
+  openingHours String     @default("")
+  description  String     @default("")
+  active       Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  producers    Producer[]
+}
+
+/// Message laissé par un visiteur à un producteur, lu dans son espace.
+/// Permet de joindre un producteur sans exposer ses coordonnées.
+model ContactMessage {
+  id            String   @id @default(cuid())
+  producerId    String
+  producer      Producer @relation(fields: [producerId], references: [id], onDelete: Cascade)
+  senderName    String
+  senderContact String
+  body          String
+  read          Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([producerId, createdAt])
+}

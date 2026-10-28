@@ -82,6 +82,8 @@ model Producer {
   products    Product[]
   relayPoints RelayPoint[]
   messages    ContactMessage[]
+  pickupSlots PickupSlot[]
+  orders      ProducerOrder[]
 
   @@index([status])
 }
@@ -99,23 +101,26 @@ model Product {
   stockStatus StockStatus @default(AVAILABLE)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+  orderItems  OrderItem[]
 
   @@index([producerId])
 }
 
 /// Lieu de dépôt où les clients peuvent retirer les produits (marché, commerce, office de tourisme…).
 model RelayPoint {
-  id           String     @id @default(cuid())
+  id           String          @id @default(cuid())
   name         String
   address      String
   commune      String
   latitude     Float
   longitude    Float
-  openingHours String     @default("")
-  description  String     @default("")
-  active       Boolean    @default(true)
-  createdAt    DateTime   @default(now())
+  openingHours String          @default("")
+  description  String          @default("")
+  active       Boolean         @default(true)
+  createdAt    DateTime        @default(now())
   producers    Producer[]
+  pickupSlots  PickupSlot[]
+  orders       ProducerOrder[]
 }
 
 /// Message laissé par un visiteur à un producteur, lu dans son espace.
@@ -131,4 +136,86 @@ model ContactMessage {
   createdAt     DateTime @default(now())
 
   @@index([producerId, createdAt])
+}
+
+/// Créneau de retrait hebdomadaire proposé par un producteur.
+model PickupSlot {
+  id           String      @id @default(cuid())
+  producerId   String
+  producer     Producer    @relation(fields: [producerId], references: [id], onDelete: Cascade)
+  /// 1 = lundi … 7 = dimanche (ISO).
+  weekday      Int
+  /// Minutes depuis minuit, heure de Paris.
+  startMinutes Int
+  endMinutes   Int
+  /// null = retrait chez le producteur.
+  relayPointId String?
+  relayPoint   RelayPoint? @relation(fields: [relayPointId], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now())
+
+  @@index([producerId])
+}
+
+enum OrderStatus {
+  /// En attente de confirmation par le producteur.
+  PENDING
+  CONFIRMED
+  /// Prête à être retirée.
+  READY
+  PICKED_UP
+  REJECTED
+  CANCELLED
+}
+
+/// Commande d'un client, pouvant concerner plusieurs producteurs. Pas de compte client :
+/// l'accès se fait par un lien secret (token).
+model Order {
+  id             String          @id @default(cuid())
+  token          String          @unique
+  customerName   String
+  customerEmail  String
+  customerPhone  String          @default("")
+  createdAt      DateTime        @default(now())
+  producerOrders ProducerOrder[]
+
+  @@index([customerEmail, createdAt])
+}
+
+/// Partie d'une commande concernant un seul producteur ; il la confirme ou la refuse indépendamment.
+model ProducerOrder {
+  id           String      @id @default(cuid())
+  orderId      String
+  order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  producerId   String
+  producer     Producer    @relation(fields: [producerId], references: [id], onDelete: Cascade)
+  status       OrderStatus @default(PENDING)
+  /// Date de retrait « AAAA-MM-JJ » (heure de Paris).
+  pickupDate   String
+  startMinutes Int
+  endMinutes   Int
+  /// null = retrait chez le producteur.
+  relayPointId String?
+  relayPoint   RelayPoint? @relation(fields: [relayPointId], references: [id], onDelete: SetNull)
+  customerNote String      @default("")
+  /// Message du producteur au client (motif de refus, précisions…).
+  producerNote String      @default("")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  items        OrderItem[]
+
+  @@index([producerId, status])
+  @@index([orderId])
+}
+
+/// Ligne de commande. Nom, unité et prix sont copiés au moment de la commande.
+model OrderItem {
+  id              String        @id @default(cuid())
+  producerOrderId String
+  producerOrder   ProducerOrder @relation(fields: [producerOrderId], references: [id], onDelete: Cascade)
+  productId       String?
+  product         Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  name            String
+  unit            String
+  priceCents      Int?
+  quantity        Int
 }

@@ -13,6 +13,8 @@ type DemoProducer = Omit<Prisma.ProducerCreateWithoutUserInput, "products" | "re
   login: string;
   products: Omit<Prisma.ProductCreateWithoutProducerInput, "producer">[];
   relays?: string[];
+  /** [jour ISO, début, fin, point relais (nom) ou null = à la ferme] */
+  slots?: [number, string, string, string | null][];
 };
 
 const relayPoints = [
@@ -39,6 +41,7 @@ const relayPoints = [
 const producers: DemoProducer[] = [
   {
     login: "rucher@demo.local",
+    slots: [[3, "10:00", "12:00", null], [6, "08:00", "13:00", "Marché d'Ax-les-Thermes"]],
     name: "Le Rucher des Estives (démo)",
     category: "MIEL",
     commune: "Orlu",
@@ -61,6 +64,7 @@ const producers: DemoProducer[] = [
   },
   {
     login: "fromage@demo.local",
+    slots: [[1, "17:00", "19:00", null], [3, "17:00", "19:00", null], [5, "17:00", "19:00", null], [6, "08:00", "13:00", "Marché d'Ax-les-Thermes"]],
     name: "Fromagerie de l'Oriège (démo)",
     category: "FROMAGE",
     commune: "Ascou",
@@ -81,6 +85,7 @@ const producers: DemoProducer[] = [
   },
   {
     login: "viande@demo.local",
+    slots: [[5, "16:00", "19:00", null], [6, "09:00", "12:00", "Épicerie du village (démo)"]],
     name: "Ferme Martin (démo)",
     category: "VIANDE",
     commune: "Mérens-les-Vals",
@@ -100,6 +105,7 @@ const producers: DemoProducer[] = [
   },
   {
     login: "laine@demo.local",
+    slots: [[4, "14:00", "18:00", null], [5, "14:00", "18:00", null], [6, "14:00", "18:00", null]],
     name: "Atelier Laine & Montagne (démo)",
     category: "TEXTILE",
     commune: "Ax-les-Thermes",
@@ -119,6 +125,7 @@ const producers: DemoProducer[] = [
   },
   {
     login: "champi@demo.local",
+    slots: [[7, "10:00", "12:00", null]],
     name: "Champignons des Bois (démo)",
     category: "CHAMPIGNONS",
     commune: "Sorgeat",
@@ -158,14 +165,29 @@ async function main() {
   }
 
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
-  for (const { login, products, relays = [], ...producer } of producers) {
+  const toMinutes = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+  for (const { login, products, relays = [], slots = [], ...producer } of producers) {
     if (await db.user.findUnique({ where: { email: login } })) continue;
-    const relayIds = await db.relayPoint.findMany({ where: { name: { in: relays } }, select: { id: true } });
+    const relayList = await db.relayPoint.findMany({ where: { name: { in: relays } }, select: { id: true, name: true } });
+    const relayIds = relayList.map(({ id }) => ({ id }));
+    const pickupSlots = slots.map(([weekday, start, end, relay]) => ({
+      weekday,
+      startMinutes: toMinutes(start),
+      endMinutes: toMinutes(end),
+      relayPointId: relay ? relayList.find((r) => r.name === relay)!.id : null,
+    }));
     await db.user.create({
       data: {
         email: login,
         passwordHash,
-        producer: { create: { ...producer, products: { create: products }, relayPoints: { connect: relayIds } } },
+        producer: {
+          create: {
+            ...producer,
+            products: { create: products },
+            relayPoints: { connect: relayIds },
+            pickupSlots: { create: pickupSlots },
+          },
+        },
       },
     });
   }

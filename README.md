@@ -2,7 +2,7 @@
 
 Annuaire et carte des petits producteurs de la vallée d'Ax-les-Thermes (miel, fromage, viande, tissus, champignons…).
 
-## V1 — fonctionnalités
+## Fonctionnalités
 
 **Visiteurs (habitants et touristes)**
 - Carte interactive (Leaflet / OpenStreetMap) et liste des producteurs, filtres par catégorie, recherche (producteur, produit, commune), filtre « produits disponibles ».
@@ -16,6 +16,14 @@ Annuaire et carte des petits producteurs de la vallée d'Ax-les-Thermes (miel, f
   - **Discret** (par défaut) : nom visible, position floutée (~1 km), adresse et contacts masqués.
   - **Anonyme** : pseudonyme (« Apiculteur·rice à Orlu »), seule la commune est indiquée.
 - Mise à jour du stock en un geste (pensée pour le téléphone), gestion des produits, choix des points relais, messages reçus.
+
+**Commande et retrait (V2)**
+- Panier multi-producteurs, sans création de compte ; paiement **sur place**, sans commission.
+- Chaque producteur définit ses **créneaux de retrait** hebdomadaires, chez lui ou en point relais ; le client choisit une date (jusqu'à 3 semaines, au moins 12 h à l'avance).
+- Chaque producteur **confirme ou refuse** sa partie de la commande (avec un message), puis la marque prête / retirée.
+- Le client suit sa commande via un **lien secret** (envoyé par e-mail). L'adresse, le téléphone et la position exacte d'un producteur ne lui sont révélés **qu'après confirmation** d'un retrait chez ce producteur.
+- **Itinéraire optimisé** par jour de retrait, depuis la position du client ou Ax-les-Thermes : ordre de passage qui respecte les créneaux, heure de départ conseillée, carte et lien Google Maps.
+- E-mails : nouvelle commande (producteur), confirmation / refus / commande prête / annulation.
 
 **Administration** (`/admin`) : validation ou suspension des producteurs, gestion des points relais.
 
@@ -46,10 +54,14 @@ Ne pas lancer le seed en production (ou définir `ADMIN_EMAIL` / `ADMIN_PASSWORD
 | `SESSION_SECRET` | Signature des sessions (≥ 32 caractères aléatoires) |
 | `LOCATION_SECRET` | Secret du floutage des positions (par défaut : `SESSION_SECRET`). **Ne pas le changer** une fois en ligne, sinon les positions floutées bougent. |
 | `NEXT_PUBLIC_TILE_URL`, `NEXT_PUBLIC_TILE_ATTRIBUTION` | Fournisseur de fonds de carte (optionnel) |
+| `APP_URL` | Adresse publique du site (liens dans les e-mails) |
+| `RESEND_API_KEY`, `MAIL_FROM` | Envoi des e-mails via [Resend](https://resend.com). Sans eux, les e-mails sont écrits dans les logs. |
+| `ORS_API_KEY` | Temps de trajet et tracés réels via [OpenRouteService](https://openrouteservice.org) (clé gratuite). Sans clé : estimation (vol d'oiseau × 1,4 à 40 km/h). |
 
 ## Mise en ligne (service payant simple)
 - **Application** : Vercel (offre Pro ~20 $/mois) ou Scalingo / Clever Cloud (hébergement en France).
 - **Base de données** : Supabase, Neon, ou la base PostgreSQL du même hébergeur.
+- **E-mails** : Resend (gratuit jusqu'à 3 000 e-mails/mois), avec un nom de domaine vérifié.
 - **Fonds de carte** : les serveurs d'OpenStreetMap ne sont pas faits pour un usage en production ; prendre un compte MapTiler ou Stadia Maps (offres gratuites puis payantes) et renseigner `NEXT_PUBLIC_TILE_URL`.
 
 Commande de build : `npm run build` ; migrations : `npm run db:deploy`.
@@ -58,6 +70,6 @@ Commande de build : `npm run build` ; migrations : `npm run db:deploy`.
 `npm run dev` · `npm run build` · `npm test` · `npm run typecheck`
 
 ## Prochaines étapes
-- **V2** : panier multi-producteurs, commande avec paiement sur place, créneaux de retrait, adresse révélée au client après confirmation, itinéraire optimisé (OpenRouteService) incluant les points relais, notifications par e-mail.
 - **V3** : paiement en ligne (Stripe Connect, sans commission), puis éventuellement Bitcoin / Lightning (BTCPay Server).
 - Version anglaise / espagnole pour les touristes, photos des produits, réinitialisation du mot de passe.
+- Quantités en stock (décompte automatique), fermetures exceptionnelles d'un créneau, rappel e-mail la veille du retrait.

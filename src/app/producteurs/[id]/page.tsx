@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AddToCart } from "@/components/AddToCart";
 import { ContactForm } from "@/components/ContactForm";
 import { LazyProducerMap } from "@/components/LazyMap";
 import { StockBadge } from "@/components/StockBadge";
 import { CATEGORY_ICONS, CATEGORY_LABELS, formatPrice } from "@/lib/labels";
+import { ORDERABLE_STOCK } from "@/lib/orders";
 import { getPublicProducer } from "@/lib/queries";
+import { formatWindow } from "@/lib/slots";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +22,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 export default async function ProducerPage({ params }: Params) {
   const data = await getPublicProducer((await params).id);
   if (!data) notFound();
-  const { producer: p, relayPoints } = data;
+  const { producer: p, relayPoints, nextPickups } = data;
+  const acceptsOrders = nextPickups.length > 0;
+  const isOrderable = (status: string) => acceptsOrders && (ORDERABLE_STOCK as readonly string[]).includes(status);
   const hasDirectContact = p.phone || p.email;
 
   return (
@@ -63,12 +68,29 @@ export default async function ProducerPage({ params }: Params) {
                         {pr.unit && pr.priceCents !== null && ` ${pr.unit}`}
                       </p>
                     </div>
-                    <StockBadge status={pr.stockStatus} />
+                    <div className="flex flex-col items-end gap-2">
+                      <StockBadge status={pr.stockStatus} />
+                      {isOrderable(pr.stockStatus) && <AddToCart productId={pr.id} productName={pr.name} />}
+                    </div>
                   </li>
                 ))}
               </ul>
             )}
           </section>
+
+          {acceptsOrders && (
+            <section>
+              <h2 className="mb-2 text-lg font-semibold">🧺 Prochains retraits possibles</h2>
+              <p className="mb-2 text-sm text-stone-600">Commandez en ligne, payez sur place au moment du retrait.</p>
+              <ul className="space-y-1 text-sm">
+                {nextPickups.slice(0, 5).map((o) => (
+                  <li key={`${o.slotId}-${o.date}`} className="first-letter:uppercase">
+                    {formatWindow(o)} · {o.place}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {p.pickupInfo && (
             <section>

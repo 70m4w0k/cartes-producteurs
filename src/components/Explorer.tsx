@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import type { Category } from "@prisma/client";
 import { CATEGORY_ICONS, CATEGORY_LABELS } from "@/lib/labels";
 import type { PublicProducer } from "@/lib/privacy";
-import type { PublicRelayPoint } from "@/lib/queries";
+import type { ListedProducer, PublicRelayPoint } from "@/lib/queries";
 import { StockBadge } from "./StockBadge";
 
 const ProducerMap = dynamic(() => import("./ProducerMap"), {
@@ -24,11 +24,12 @@ function hasAvailableProduct(p: PublicProducer) {
   return p.products.some((pr) => pr.stockStatus === "AVAILABLE" || pr.stockStatus === "LOW");
 }
 
-export default function Explorer({ producers, relayPoints }: { producers: PublicProducer[]; relayPoints: PublicRelayPoint[] }) {
+export default function Explorer({ producers, relayPoints }: { producers: ListedProducer[]; relayPoints: PublicRelayPoint[] }) {
   const [categories, setCategories] = useState<Set<Category>>(new Set());
   const [query, setQuery] = useState("");
   const [onlyAvailable, setOnlyAvailable] = useState(false);
   const [showRelays, setShowRelays] = useState(true);
+  const [onlyOrderable, setOnlyOrderable] = useState(false);
   const [focus, setFocus] = useState<{ lat: number; lng: number } | null>(null);
 
   const filtered = useMemo(() => {
@@ -36,11 +37,12 @@ export default function Explorer({ producers, relayPoints }: { producers: Public
     return producers.filter((p) => {
       if (categories.size && !categories.has(p.category)) return false;
       if (onlyAvailable && (p.closed || !hasAvailableProduct(p))) return false;
+      if (onlyOrderable && !p.acceptsOrders) return false;
       if (!q) return true;
       const haystack = [p.displayName, p.description, p.commune, CATEGORY_LABELS[p.category], ...p.products.map((pr) => pr.name)].join(" ");
       return normalize(haystack).includes(q);
     });
-  }, [producers, categories, query, onlyAvailable]);
+  }, [producers, categories, query, onlyAvailable, onlyOrderable]);
 
   const toggleCategory = (c: Category) =>
     setCategories((prev) => {
@@ -82,6 +84,10 @@ export default function Explorer({ producers, relayPoints }: { producers: Public
             Produits disponibles uniquement
           </label>
           <label className="flex items-center gap-2">
+            <input type="checkbox" checked={onlyOrderable} onChange={(e) => setOnlyOrderable(e.target.checked)} />
+            Commande en ligne 🧺
+          </label>
+          <label className="flex items-center gap-2">
             <input type="checkbox" checked={showRelays} onChange={(e) => setShowRelays(e.target.checked)} />
             Afficher les points relais 📦
           </label>
@@ -102,6 +108,7 @@ export default function Explorer({ producers, relayPoints }: { producers: Public
                   </Link>
                   <p className="text-sm text-stone-600">
                     {CATEGORY_LABELS[p.category]} · {p.commune}
+                    {p.acceptsOrders && <span className="ml-2 rounded-full bg-moss-100 px-2 py-0.5 text-xs font-medium text-moss-800">🧺 Commande en ligne</span>}
                   </p>
                   {p.closed && (
                     <p className="mt-1 text-sm font-medium text-red-700">Fermé temporairement{p.closedNote && ` — ${p.closedNote}`}</p>

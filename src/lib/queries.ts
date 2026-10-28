@@ -1,5 +1,23 @@
+import type { PickupSlot, Producer, RelayPoint } from "@prisma/client";
 import { db } from "./db";
 import { toPublicProducer, type PublicProducer } from "./privacy";
+import { upcomingOccurrences, type SlotOccurrence } from "./slots";
+
+export type ListedProducer = PublicProducer & { acceptsOrders: boolean };
+
+type WithSlots = Producer & { pickupSlots: (PickupSlot & { relayPoint: RelayPoint | null })[] };
+
+/** Prochains retraits possibles, en ignorant les créneaux de points relais désactivés. */
+function nextPickups(p: WithSlots): (SlotOccurrence & { place: string })[] {
+  if (p.closed) return [];
+  const slots = p.pickupSlots.filter((s) => s.relayPoint === null || s.relayPoint.active);
+  return upcomingOccurrences(slots).map((o) => {
+    const relay = slots.find((s) => s.id === o.slotId)?.relayPoint;
+    return { ...o, place: relay ? `📦 ${relay.name}` : `Chez le producteur (${p.commune})` };
+  });
+}
+
+const slotsInclude = { pickupSlots: { include: { relayPoint: true } } } as const;
 
 export type PublicRelayPoint = {
   id: string;
@@ -15,13 +33,13 @@ export type PublicRelayPoint = {
 
 const visibleProducer = { status: "APPROVED" } as const;
 
-export async function getPublicProducers(): Promise<PublicProducer[]> {
+export async function getPublicProducers(): Promise<ListedProducer[]> {
   const producers = await db.producer.findMany({
     where: visibleProducer,
-    include: { products: { orderBy: { name: "asc" } } },
+    include: { products: { orderBy: { name: "asc" } }, ...slotsInclude },
     orderBy: { createdAt: "asc" },
   });
-  return producers.map((p) => toPublicProducer(p));
+  return producers.map((p) => ({ ...toPublicProducer(p), acceptsOrders: nextPickups(p).length > 0 }));
 }
 
 export async function getPublicProducer(id: string) {
@@ -30,10 +48,11 @@ export async function getPublicProducer(id: string) {
     include: {
       products: { orderBy: { name: "asc" } },
       relayPoints: { where: { active: true }, orderBy: { name: "asc" } },
+      ...slotsInclude,
     },
   });
   if (!p) return null;
-  return { producer: toPublicProducer(p), relayPoints: p.relayPoints };
+  return { producer: toPublicProducer(p), relayPoints: p.relayPoints, nextPickups: nextPickups(p) };
 }
 
 export async function getPublicRelayPoints(): Promise<PublicRelayPoint[]> {

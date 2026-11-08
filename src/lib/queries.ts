@@ -1,78 +1,64 @@
-import type { PickupSlot, Producer, RelayPoint } from "@prisma/client";
 import { db } from "./db";
-import { toPublicProducer, type PublicProducer } from "./privacy";
-import { upcomingOccurrences, type SlotOccurrence } from "./slots";
+import { toPublicEvent, toPublicPlace, type PublicEvent, type PublicPlace } from "./privacy";
 
-export type ListedProducer = PublicProducer & { acceptsOrders: boolean };
+const approved = { status: "APPROVED" } as const;
 
-type WithSlots = Producer & { pickupSlots: (PickupSlot & { relayPoint: RelayPoint | null })[] };
-
-/** Prochains retraits possibles, en ignorant les créneaux de points relais désactivés. */
-function nextPickups(p: WithSlots): (SlotOccurrence & { place: string })[] {
-  if (p.closed) return [];
-  const slots = p.pickupSlots.filter((s) => s.relayPoint === null || s.relayPoint.active);
-  return upcomingOccurrences(slots).map((o) => {
-    const relay = slots.find((s) => s.id === o.slotId)?.relayPoint;
-    return { ...o, place: relay ? `📦 ${relay.name}` : `Chez le producteur (${p.commune})` };
-  });
+/** Toutes les données de la carte : la vallée compte quelques centaines de fiches, filtrées ensuite dans le navigateur. */
+export async function getMapData(): Promise<{ places: PublicPlace[]; events: PublicEvent[] }> {
+  const now = Date.now();
+  const [places, events] = await Promise.all([
+    db.place.findMany({ where: approved, include: { products: { orderBy: { name: "asc" } } }, orderBy: { name: "asc" } }),
+    db.event.findMany({
+      where: { ...approved, endsAt: { gte: new Date(now) }, startsAt: { lte: new Date(now + 120 * 86_400_000) } },
+      orderBy: { startsAt: "asc" },
+    }),
+  ]);
+  return { places: places.map((p) => toPublicPlace(p)), events: events.map(toPublicEvent) };
 }
 
-const slotsInclude = { pickupSlots: { include: { relayPoint: true } } } as const;
-
-export type PublicRelayPoint = {
-  id: string;
-  name: string;
-  address: string;
-  commune: string;
-  lat: number;
-  lng: number;
-  openingHours: string;
-  description: string;
-  producers: { id: string; displayName: string; category: PublicProducer["category"] }[];
-};
-
-const visibleProducer = { status: "APPROVED" } as const;
-
-export async function getPublicProducers(): Promise<ListedProducer[]> {
-  const producers = await db.producer.findMany({
-    where: visibleProducer,
-    include: { products: { orderBy: { name: "asc" } }, ...slotsInclude },
-    orderBy: { createdAt: "asc" },
-  });
-  return producers.map((p) => ({ ...toPublicProducer(p), acceptsOrders: nextPickups(p).length > 0 }));
-}
-
-export async function getPublicProducer(id: string) {
-  const p = await db.producer.findFirst({
-    where: { id, ...visibleProducer },
+export async function getPlacePage(id: string) {
+  const p = await db.place.findFirst({
+    where: { id, ...approved },
     include: {
       products: { orderBy: { name: "asc" } },
-      relayPoints: { where: { active: true }, orderBy: { name: "asc" } },
-      ...slotsInclude,
+      sellsAt: { where: approved },
+      sellers: { where: approved, include: { products: true } },
+      organisedEvents: { where: { ...approved, endsAt: { gte: new Date() } }, orderBy: { startsAt: "asc" }, take: 10 },
+      attendedEvents: { where: { ...approved, endsAt: { gte: new Date() } }, orderBy: { startsAt: "asc" }, take: 10 },
     },
   });
   if (!p) return null;
-  return { producer: toPublicProducer(p), relayPoints: p.relayPoints, nextPickups: nextPickups(p) };
+  const events = [...p.organisedEvents, ...p.attendedEvents]
+    .filter((e, i, all) => all.findIndex((x) => x.id === e.id) === i)
+    .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime());
+  return {
+    place: toPublicPlace(p),
+    sellsAt: p.sellsAt.map((x) => toPublicPlace(x)),
+    sellers: p.sellers.map((x) => toPublicPlace(x)),
+    events: events.map(toPublicEvent),
+  };
 }
 
-export async function getPublicRelayPoints(): Promise<PublicRelayPoint[]> {
-  const relays = await db.relayPoint.findMany({
-    where: { active: true },
-    include: { producers: { where: visibleProducer, include: { products: false } } },
-    orderBy: { name: "asc" },
+export async function getEventPage(id: string) {
+  const e = await db.event.findFirst({
+    where: { id, ...approved },
+    include: { participants: { where: approved }, organiserPlace: true },
   });
-  return relays.map((r) => ({
-    id: r.id,
-    name: r.name,
-    address: r.address,
-    commune: r.commune,
-    lat: r.latitude,
-    lng: r.longitude,
-    openingHours: r.openingHours,
-    description: r.description,
-    producers: r.producers.map((p) => {
-      const pub = toPublicProducer(p);
-      return { id: pub.id, displayName: pub.displayName, category: pub.category };
-    }),
-  }));
+  if (!e) return null;
+  return {
+    event: toPublicEvent(e),
+    participants: e.participants.map((x) => toPublicPlace(x)),
+    organiserPlace: e.organiserPlace && e.organiserPlace.status === "APPROVED" ? toPublicPlace(e.organiserPlace) : null,
+  };
+}
+
+/** Lieux et événements à proximité (pour suggérer quoi faire autour d'une fiche). */
+export async function getNearbyEvents(lat: number, lng: number, km = 6) {
+  const d = km / 111;
+  const events = await db.event.findMany({
+    where: { ...approved, endsAt: { gte: new Date() }, latitude: { gte: lat - d, lte: lat + d }, longitude: { gte: lng - d * 1.4, lte: lng + d * 1.4 } },
+    orderBy: { startsAt: "asc" },
+    take: 4,
+  });
+  return events.map(toPublicEvent);
 }

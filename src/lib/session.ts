@@ -53,11 +53,14 @@ export async function requireUser() {
   return user;
 }
 
-export async function requireProducer() {
+/** Lieu modifiable par l'utilisateur connecté : le sien, ou n'importe lequel pour un administrateur. */
+export async function requirePlaceAccess(placeId: string) {
   const user = await requireUser();
-  const producer = await db.producer.findUnique({ where: { userId: user.id } });
-  if (!producer) redirect(user.role === "ADMIN" ? "/admin" : "/connexion");
-  return producer;
+  const place = await db.place.findFirst({
+    where: user.role === "ADMIN" ? { id: placeId } : { id: placeId, ownerId: user.id },
+  });
+  if (!place) throw new Error("Fiche introuvable ou non autorisée");
+  return { user, place };
 }
 
 export async function requireAdmin() {

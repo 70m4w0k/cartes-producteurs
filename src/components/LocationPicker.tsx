@@ -1,13 +1,13 @@
 "use client";
 
-import { MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet";
-import { VALLEY_CENTER } from "@/lib/communes";
-import { emojiIcon, TILE_ATTRIBUTION, TILE_URL } from "./map-shared";
+import { LayersControl, MapContainer, Marker, TileLayer, useMapEvents } from "react-leaflet";
+import { BASE_LAYERS, VALLEY_BOUNDS, pinIcon } from "./map-shared";
 
 type Props = {
   value: { lat: number; lng: number } | null;
   onChange: (v: { lat: number; lng: number }) => void;
   emoji: string;
+  color: string;
 };
 
 function ClickHandler({ onChange }: Pick<Props, "onChange">) {
@@ -15,22 +15,23 @@ function ClickHandler({ onChange }: Pick<Props, "onChange">) {
   return null;
 }
 
-export default function LocationPicker({ value, onChange, emoji }: Props) {
+export default function LocationPicker({ value, onChange, emoji, color }: Props) {
   return (
-    <MapContainer center={value ? [value.lat, value.lng] : VALLEY_CENTER} zoom={value ? 14 : 11} className="h-full w-full">
-      <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
+    <MapContainer {...(value ? { center: [value.lat, value.lng] as [number, number], zoom: 15 } : { bounds: VALLEY_BOUNDS })} className="h-full w-full">
+      <LayersControl position="topright">
+        {BASE_LAYERS.map((l, i) => (
+          <LayersControl.BaseLayer key={l.id} name={l.name} checked={i === 0}>
+            <TileLayer url={l.url} attribution={l.attribution} maxZoom={l.maxZoom} subdomains={l.subdomains ?? "abc"} />
+          </LayersControl.BaseLayer>
+        ))}
+      </LayersControl>
       <ClickHandler onChange={onChange} />
       {value && (
         <Marker
           position={[value.lat, value.lng]}
-          icon={emojiIcon(emoji)}
+          icon={pinIcon(emoji, color)}
           draggable
-          eventHandlers={{
-            dragend: (e) => {
-              const ll = e.target.getLatLng();
-              onChange({ lat: ll.lat, lng: ll.lng });
-            },
-          }}
+          eventHandlers={{ dragend: (e) => { const ll = e.target.getLatLng(); onChange({ lat: ll.lat, lng: ll.lng }); } }}
         />
       )}
     </MapContainer>

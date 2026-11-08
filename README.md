@@ -1,75 +1,70 @@
-# Producteurs de la vallée d'Ax
+# Vallée d'Ax · à voir, à faire, à goûter
 
-Annuaire et carte des petits producteurs de la vallée d'Ax-les-Thermes (miel, fromage, viande, tissus, champignons…).
+Carte touristique de la vallée d'Ax-les-Thermes (Haute-Ariège), dans l'esprit d'un office de tourisme, qui met en avant les commerçants et producteurs locaux : activités (randonnée, canyoning, spéléo…), producteurs, commerces, marchés et événements.
 
 ## Fonctionnalités
 
-**Visiteurs (habitants et touristes)**
-- Carte interactive (Leaflet / OpenStreetMap) et liste des producteurs, filtres par catégorie, recherche (producteur, produit, commune), filtre « produits disponibles ».
-- Fiche producteur : produits, prix, statut de stock (disponible, stock limité, rupture, hors saison), horaires de retrait, points relais, fermeture temporaire.
-- Points relais : lieux où plusieurs producteurs déposent leurs produits.
-- Formulaire de contact : permet de joindre un producteur sans que ses coordonnées soient publiques.
+**Visiteurs**
+- **Carte façon Google Maps** à gauche (fonds Plan, Relief, Satellite ; épingles par type regroupées quand elles sont proches ; « me localiser » ; « voir toute la vallée »), **résultats** à droite. Sur mobile : la liste, et un bouton pour basculer sur la carte.
+- **Recherche** plein texte et onglets par type (Événements, Activités, Producteurs, Commerces, Marchés & dépôts) avec leurs compteurs.
+- **Filtres** repliés derrière un bouton : catégories, commune et rayon (2 à 20 km), dates (aujourd'hui, week-end, 7 ou 30 jours, dates précises), « ouvert maintenant ». Les filtres actifs restent visibles en pastilles.
+- **À chaque recherche, la carte n'affiche que les résultats et se recadre dessus.** La recherche est dans l'adresse de la page : on peut la partager par lien.
+- Les dates agissent sur les événements, les jours d'ouverture et la **saison** des activités (le canyoning disparaît en hiver, avec un lien pour l'afficher quand même).
+- Les **marchés hebdomadaires** apparaissent aussi dans l'agenda, calculés à partir de leurs jours de tenue.
+- **Une page par lieu** (mini-site) : présentation, produits et stock, horaires, infos pratiques des activités, marchés où trouver un producteur, producteurs présents sur un marché, prochaines dates, contact, itinéraire, lien à partager. **Une page par événement** : programme, tarif, organisateur, producteurs présents.
 
-**Producteurs** (`/inscription`, puis `/espace`)
-- Choix de la visibilité :
-  - **Public** : nom, adresse exacte, téléphone, e-mail.
-  - **Discret** (par défaut) : nom visible, position floutée (~1 km), adresse et contacts masqués.
-  - **Anonyme** : pseudonyme (« Apiculteur·rice à Orlu »), seule la commune est indiquée.
-- Mise à jour du stock en un geste (pensée pour le téléphone), gestion des produits, choix des points relais, messages reçus.
+**Pros** (`/inscription`, puis `/espace`) — producteurs, commerçants, prestataires d'activités
+- Fiche complète : accroche, présentation, horaires (éditeur jour par jour), saison, infos pratiques, labels, position sur la carte, fermeture temporaire.
+- Producteurs : **visibilité** (public, discret, anonyme), produits et **stock** en un geste, marchés où ils vendent.
+- **Événements** : portes ouvertes, dégustations… publiés dans l'agenda et sur la carte.
+- Messages reçus via le formulaire de contact (prévenus par e-mail).
 
-**Commande et retrait (V2)**
-- Panier multi-producteurs, sans création de compte ; paiement **sur place**, sans commission.
-- Chaque producteur définit ses **créneaux de retrait** hebdomadaires, chez lui ou en point relais ; le client choisit une date (jusqu'à 3 semaines, au moins 12 h à l'avance).
-- Chaque producteur **confirme ou refuse** sa partie de la commande (avec un message), puis la marque prête / retirée.
-- Le client suit sa commande via un **lien secret** (envoyé par e-mail). L'adresse, le téléphone et la position exacte d'un producteur ne lui sont révélés **qu'après confirmation** d'un retrait chez ce producteur.
-- **Itinéraire optimisé** par jour de retrait, depuis la position du client ou Ax-les-Thermes : ordre de passage qui respecte les créneaux, heure de départ conseillée, carte et lien Google Maps.
-- E-mails : nouvelle commande (producteur), confirmation / refus / commande prête / annulation.
-
-**Administration** (`/admin`) : validation ou suspension des producteurs, gestion des points relais.
+**Administration** (`/admin`) : validation des fiches, masquage des événements, **création de fiches sans compte** (sites de randonnée, marchés, commerces…) et d'événements (fêtes de village, concerts…).
 
 ### Confidentialité
-Toutes les données envoyées au navigateur passent par `src/lib/privacy.ts` (`toPublicProducer`) :
-les champs masqués ne quittent jamais le serveur. Le floutage est un décalage **déterministe et secret**
-(HMAC avec `LOCATION_SECRET`) : recharger la page ne permet pas de moyenner la vraie position, et le décalage
-ne peut pas être recalculé sans le secret. Les tests (`tests/privacy.test.ts`) vérifient ces garanties.
+Tout ce qui part vers le navigateur passe par `src/lib/privacy.ts`. Seuls les producteurs peuvent être discrets ou anonymes : leurs coordonnées masquées ne quittent jamais le serveur, et leur position est floutée par un décalage **déterministe et secret** (`LOCATION_SECRET`). Les tests (`tests/privacy.test.ts`) le vérifient.
 
 ## Stack
-Next.js 15 (App Router, server actions) · TypeScript · Tailwind CSS 4 · Prisma 6 · PostgreSQL · Leaflet.
+Next.js 15 (App Router, server actions) · TypeScript · Tailwind CSS 4 · Prisma 6 · PostgreSQL · Leaflet (+ regroupement d'épingles).
+La recherche tourne dans le navigateur (`src/lib/search.ts`, testée) : la vallée compte quelques centaines de fiches, le résultat est instantané.
 
 ## Démarrer en local
 ```bash
 cp .env.example .env          # puis renseigner DATABASE_URL et SESSION_SECRET
 npm install
 npx prisma migrate deploy
-npm run db:seed               # données de démonstration FICTIVES
+npm run db:seed               # données de démonstration
 npm run dev
 ```
-Comptes de démo : `admin@demo.local` / `demo-admin-123`, producteurs `rucher@demo.local`, `fromage@demo.local`… / `demo-producteur`.
-Ne pas lancer le seed en production (ou définir `ADMIN_EMAIL` / `ADMIN_PASSWORD`).
+Comptes de démo : `admin@demo.local` / `demo-admin-123` ; pros `rucher@demo.local`, `fromage@demo.local`, `boulangerie@demo.local`, `canyon@demo.local`… / `demo-producteur`.
+Les commerces, prestataires et événements de démo sont **fictifs** ; les sites naturels (Dent d'Orlu, étang de Naguilhes, bassin des Ladres…) sont réels. Ne pas lancer le seed en production.
 
 ## Variables d'environnement
 | Variable | Rôle |
 |---|---|
 | `DATABASE_URL` | Base PostgreSQL |
 | `SESSION_SECRET` | Signature des sessions (≥ 32 caractères aléatoires) |
-| `LOCATION_SECRET` | Secret du floutage des positions (par défaut : `SESSION_SECRET`). **Ne pas le changer** une fois en ligne, sinon les positions floutées bougent. |
-| `NEXT_PUBLIC_TILE_URL`, `NEXT_PUBLIC_TILE_ATTRIBUTION` | Fournisseur de fonds de carte (optionnel) |
+| `LOCATION_SECRET` | Secret du floutage des positions (par défaut : `SESSION_SECRET`). Ne pas le changer une fois en ligne. |
+| `NEXT_PUBLIC_MAPTILER_KEY` | Fonds de carte MapTiler (recommandé en production). Sans clé : CARTO Voyager, OpenTopoMap et Esri, gratuits mais limités à un usage modéré et non commercial. |
 | `APP_URL` | Adresse publique du site (liens dans les e-mails) |
-| `RESEND_API_KEY`, `MAIL_FROM` | Envoi des e-mails via [Resend](https://resend.com). Sans eux, les e-mails sont écrits dans les logs. |
-| `ORS_API_KEY` | Temps de trajet et tracés réels via [OpenRouteService](https://openrouteservice.org) (clé gratuite). Sans clé : estimation (vol d'oiseau × 1,4 à 40 km/h). |
+| `RESEND_API_KEY`, `MAIL_FROM` | E-mails via [Resend](https://resend.com) ; sans eux, les e-mails sont écrits dans les logs |
 
 ## Mise en ligne (service payant simple)
-- **Application** : Vercel (offre Pro ~20 $/mois) ou Scalingo / Clever Cloud (hébergement en France).
-- **Base de données** : Supabase, Neon, ou la base PostgreSQL du même hébergeur.
-- **E-mails** : Resend (gratuit jusqu'à 3 000 e-mails/mois), avec un nom de domaine vérifié.
-- **Fonds de carte** : les serveurs d'OpenStreetMap ne sont pas faits pour un usage en production ; prendre un compte MapTiler ou Stadia Maps (offres gratuites puis payantes) et renseigner `NEXT_PUBLIC_TILE_URL`.
+- **Application** : Vercel, ou Scalingo / Clever Cloud (hébergement en France).
+- **Base de données** : Supabase, Neon ou la base PostgreSQL de l'hébergeur.
+- **Fonds de carte** : un compte [MapTiler](https://www.maptiler.com) (offre gratuite puis payante) et `NEXT_PUBLIC_MAPTILER_KEY`.
+- **E-mails** : Resend.
 
-Commande de build : `npm run build` ; migrations : `npm run db:deploy`.
+## Alimenter la carte
+Le plus long est de recenser les lieux. Pistes :
+- **Apidae**, la base d'informations touristiques des offices de tourisme d'Occitanie : activités, commerces, hébergements et événements, avec une API d'export. Un partenariat avec l'office de tourisme des Pyrénées ariégeoises permettrait d'importer ces données.
+- Le **Carnet gourmand** de la Communauté de communes de la Haute-Ariège pour les producteurs en vente directe.
+- **OpenStreetMap** pour compléter les commerces.
 
 ## Scripts
 `npm run dev` · `npm run build` · `npm test` · `npm run typecheck`
 
 ## Prochaines étapes
-- **V3** : paiement en ligne (Stripe Connect, sans commission), puis éventuellement Bitcoin / Lightning (BTCPay Server).
-- Version anglaise / espagnole pour les touristes, photos des produits, réinitialisation du mot de passe.
-- Quantités en stock (décompte automatique), fermetures exceptionnelles d'un créneau, rappel e-mail la veille du retrait.
+- Traductions anglais / espagnol / catalan (déjà prototypées dans la maquette).
+- Photos des lieux (stockage d'images).
+- Import automatique depuis Apidae.

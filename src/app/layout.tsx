@@ -1,43 +1,41 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
-import { CartProvider } from "@/components/cart";
-import { CartLink } from "@/components/CartLink";
+import { Suspense } from "react";
+import { NavLinks } from "@/components/NavLinks";
 import { getSession } from "@/lib/session";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Producteurs de la vallée d'Ax",
-  description: "Trouvez les petits producteurs de la vallée d'Ax-les-Thermes : miel, fromage, viande, tissus, champignons.",
+  title: "Vallée d'Ax · à voir, à faire, à goûter",
+  description: "Activités, producteurs, commerces, marchés et événements de la vallée d'Ax-les-Thermes, en Haute-Ariège.",
 };
+
+export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover" };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const session = await getSession();
   return (
     <html lang="fr">
-      <body className="min-h-screen flex flex-col">
-        <CartProvider>
-          <header className="border-b border-stone-200 bg-white">
-            <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-5 gap-y-2 px-4 py-3">
-              <Link href="/" className="mr-auto text-lg font-bold text-moss-800">
-                🏔️ Producteurs de la vallée d&apos;Ax
-              </Link>
-              <Link href="/" className="hover:underline">Carte</Link>
-              <Link href="/points-relais" className="hover:underline">Points relais</Link>
-              <CartLink />
-              {session?.role === "ADMIN" && <Link href="/admin" className="hover:underline">Admin</Link>}
-              {session ? (
-                <Link href={session.role === "ADMIN" ? "/admin" : "/espace"} className="btn">Mon espace</Link>
-              ) : (
-                <Link href="/connexion" className="btn">Espace producteur</Link>
-              )}
-            </nav>
-          </header>
-          <main className="flex-1">{children}</main>
-          <footer className="border-t border-stone-200 bg-white px-4 py-4 text-center text-sm text-stone-500">
-            Annuaire local des producteurs de Haute-Ariège ·{" "}
-            <Link href="/inscription" className="underline">Vous êtes producteur ? Inscrivez-vous</Link>
-          </footer>
-        </CartProvider>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&display=swap" />
+      </head>
+      <body className="flex min-h-dvh flex-col">
+        <header className="sticky top-0 z-[1100] border-b border-stone-200 bg-white">
+          <nav className="flex h-[57px] items-center gap-x-1 gap-y-1 px-4 text-[0.95rem]">
+            <Link href="/" className="mr-auto flex flex-col leading-tight">
+              <span className="font-display text-lg font-bold text-moss-800">Vallée d&apos;Ax</span>
+              <span className="hidden text-[0.7rem] uppercase tracking-wider text-stone-500 sm:block">Haute-Ariège · à voir, à faire, à goûter</span>
+            </Link>
+            <Suspense><NavLinks /></Suspense>
+            <Link href={session ? (session.role === "ADMIN" ? "/admin" : "/espace") : "/connexion"} className="ml-1 rounded-lg border border-stone-300 px-2.5 py-1.5 hover:bg-stone-100">
+              {session ? (session.role === "ADMIN" ? "Admin" : "Mon espace") : "Espace pro"}
+            </Link>
+          </nav>
+        </header>
+        <main className="flex-1">{children}</main>
       </body>
     </html>
   );

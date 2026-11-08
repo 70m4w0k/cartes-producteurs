@@ -1,9 +1,14 @@
+import { Suspense } from "react";
 import Explorer from "@/components/Explorer";
-import { getPublicProducers, getPublicRelayPoints } from "@/lib/queries";
+import { getMapData } from "@/lib/queries";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [producers, relayPoints] = await Promise.all([getPublicProducers(), getPublicRelayPoints()]);
-  return <Explorer producers={producers} relayPoints={relayPoints} />;
+  const { places, events } = await getMapData();
+  return (
+    <Suspense>
+      <Explorer places={places} events={events} />
+    </Suspense>
+  );
 }

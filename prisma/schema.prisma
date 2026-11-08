@@ -8,20 +8,21 @@ datasource db {
 }
 
 enum Role {
-  PRODUCER
+  /// Professionnel qui gère une ou plusieurs fiches (producteur, commerçant, prestataire).
+  PRO
   ADMIN
 }
 
-enum Category {
-  MIEL
-  FROMAGE
-  VIANDE
-  TEXTILE
-  CHAMPIGNONS
-  AUTRE
+/// Grande famille de lieu. Les sous-catégories sont dans src/lib/categories.ts.
+enum PlaceKind {
+  PRODUCTEUR
+  COMMERCE
+  ACTIVITE
+  /// Où acheter local : marchés, dépôts de produits fermiers.
+  LOCAL
 }
 
-/// Ce que le public peut voir du producteur. Choisi par le producteur lui-même.
+/// Ce que le public voit d'un producteur. Les autres lieux sont toujours publics.
 enum Visibility {
   /// Nom, adresse exacte et coordonnées visibles.
   PUBLIC
@@ -31,8 +32,8 @@ enum Visibility {
   ANONYMOUS
 }
 
-enum ProducerStatus {
-  /// Inscrit, en attente de validation par un administrateur.
+enum PublicationStatus {
+  /// En attente de validation par un administrateur.
   PENDING
   APPROVED
   SUSPENDED
@@ -46,176 +47,118 @@ enum StockStatus {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
+  id           String   @id @default(cuid())
+  email        String   @unique
   passwordHash String
-  role         Role      @default(PRODUCER)
-  createdAt    DateTime  @default(now())
-  producer     Producer?
+  role         Role     @default(PRO)
+  createdAt    DateTime @default(now())
+  places       Place[]
 }
 
-model Producer {
-  id          String           @id @default(cuid())
-  userId      String           @unique
-  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name        String
-  category    Category
-  description String           @default("")
-  /// Commune de la vallée (voir src/lib/communes.ts).
-  commune     String
-  address     String           @default("")
-  /// Position exacte. Jamais envoyée au navigateur si visibility != PUBLIC.
-  latitude    Float?
-  longitude   Float?
-  phone       String           @default("")
-  email       String           @default("")
-  website     String           @default("")
-  /// Jours et horaires où l'on peut venir chercher les produits.
-  pickupInfo  String           @default("")
-  visibility  Visibility       @default(APPROXIMATE)
-  status      ProducerStatus   @default(PENDING)
+model Place {
+  id              String            @id @default(cuid())
+  /// null : fiche créée par l'administration (office de tourisme), sans compte pro.
+  ownerId         String?
+  owner           User?             @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  kind            PlaceKind
+  subcategory     String
+  name            String
+  /// Une phrase d'accroche.
+  tagline         String            @default("")
+  description     String            @default("")
+  story           String            @default("")
+  commune         String
+  address         String            @default("")
+  /// Position exacte. Jamais envoyée au navigateur pour un producteur non public.
+  latitude        Float?
+  longitude       Float?
+  phone           String            @default("")
+  email           String            @default("")
+  website         String            @default("")
+  labels          String[]          @default([])
+  /// Horaires hebdomadaires : { "1": [[480, 750], [930, 1140]], … } (1 = lundi, minutes depuis minuit).
+  /// Pour un marché, ce sont ses jours et heures de tenue.
+  hours           Json?
+  /// Mois d'ouverture ou de pratique (1-12). Vide = toute l'année.
+  season          Int[]             @default([])
+  /// Infos d'activité : durée, distance, dénivelé, niveau, public, tarif, point de départ, encadrant.
+  facts           Json?
+  visibility      Visibility        @default(PUBLIC)
+  status          PublicationStatus @default(PENDING)
   /// Fermeture temporaire (congés, fin de saison…), avec un message optionnel.
-  closed      Boolean          @default(false)
-  closedNote  String           @default("")
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  products    Product[]
-  relayPoints RelayPoint[]
-  messages    ContactMessage[]
-  pickupSlots PickupSlot[]
-  orders      ProducerOrder[]
+  closed          Boolean           @default(false)
+  closedNote      String            @default("")
+  stockUpdatedAt  DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  products        Product[]
+  /// Marchés et dépôts où ce producteur vend (et, en sens inverse, les producteurs d'un marché).
+  sellsAt         Place[]           @relation("SellsAt")
+  sellers         Place[]           @relation("SellsAt")
+  organisedEvents Event[]           @relation("EventOrganiser")
+  attendedEvents  Event[]           @relation("EventParticipants")
+  messages        ContactMessage[]
 
-  @@index([status])
+  @@index([status, kind])
 }
 
 model Product {
   id          String      @id @default(cuid())
-  producerId  String
-  producer    Producer    @relation(fields: [producerId], references: [id], onDelete: Cascade)
+  placeId     String
+  place       Place       @relation(fields: [placeId], references: [id], onDelete: Cascade)
   name        String
   description String      @default("")
   /// Ex. « le pot de 500 g », « le kg ».
   unit        String      @default("")
-  /// Prix en centimes ; null = prix sur demande.
+  /// Prix indicatif en centimes ; null = prix sur demande.
   priceCents  Int?
   stockStatus StockStatus @default(AVAILABLE)
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
-  orderItems  OrderItem[]
 
-  @@index([producerId])
+  @@index([placeId])
 }
 
-/// Lieu de dépôt où les clients peuvent retirer les produits (marché, commerce, office de tourisme…).
-model RelayPoint {
-  id           String          @id @default(cuid())
-  name         String
-  address      String
-  commune      String
-  latitude     Float
-  longitude    Float
-  openingHours String          @default("")
-  description  String          @default("")
-  active       Boolean         @default(true)
-  createdAt    DateTime        @default(now())
-  producers    Producer[]
-  pickupSlots  PickupSlot[]
-  orders       ProducerOrder[]
+/// Événement ponctuel : fête de village, concert, foire, course… Les marchés hebdomadaires
+/// sont des lieux (LOCAL) dont les occurrences sont calculées à partir des horaires.
+model Event {
+  id               String            @id @default(cuid())
+  /// Lieu organisateur (facultatif) : l'événement est alors géré par son propriétaire.
+  organiserPlaceId String?
+  organiserPlace   Place?            @relation("EventOrganiser", fields: [organiserPlaceId], references: [id], onDelete: Cascade)
+  subcategory      String
+  title            String
+  tagline          String            @default("")
+  description      String            @default("")
+  programme        String[]          @default([])
+  commune          String
+  address          String            @default("")
+  latitude         Float
+  longitude        Float
+  startsAt         DateTime
+  endsAt           DateTime
+  /// Texte libre : « Gratuit », « 10 € »…
+  price            String            @default("")
+  organiser        String            @default("")
+  status           PublicationStatus @default(APPROVED)
+  participants     Place[]           @relation("EventParticipants")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([status, startsAt])
 }
 
-/// Message laissé par un visiteur à un producteur, lu dans son espace.
+/// Message laissé par un visiteur sur une fiche, lu dans l'espace pro.
 /// Permet de joindre un producteur sans exposer ses coordonnées.
 model ContactMessage {
   id            String   @id @default(cuid())
-  producerId    String
-  producer      Producer @relation(fields: [producerId], references: [id], onDelete: Cascade)
+  placeId       String
+  place         Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
   senderName    String
   senderContact String
   body          String
   read          Boolean  @default(false)
   createdAt     DateTime @default(now())
 
-  @@index([producerId, createdAt])
-}
-
-/// Créneau de retrait hebdomadaire proposé par un producteur.
-model PickupSlot {
-  id           String      @id @default(cuid())
-  producerId   String
-  producer     Producer    @relation(fields: [producerId], references: [id], onDelete: Cascade)
-  /// 1 = lundi … 7 = dimanche (ISO).
-  weekday      Int
-  /// Minutes depuis minuit, heure de Paris.
-  startMinutes Int
-  endMinutes   Int
-  /// null = retrait chez le producteur.
-  relayPointId String?
-  relayPoint   RelayPoint? @relation(fields: [relayPointId], references: [id], onDelete: Cascade)
-  createdAt    DateTime    @default(now())
-
-  @@index([producerId])
-}
-
-enum OrderStatus {
-  /// En attente de confirmation par le producteur.
-  PENDING
-  CONFIRMED
-  /// Prête à être retirée.
-  READY
-  PICKED_UP
-  REJECTED
-  CANCELLED
-}
-
-/// Commande d'un client, pouvant concerner plusieurs producteurs. Pas de compte client :
-/// l'accès se fait par un lien secret (token).
-model Order {
-  id             String          @id @default(cuid())
-  token          String          @unique
-  customerName   String
-  customerEmail  String
-  customerPhone  String          @default("")
-  createdAt      DateTime        @default(now())
-  producerOrders ProducerOrder[]
-
-  @@index([customerEmail, createdAt])
-}
-
-/// Partie d'une commande concernant un seul producteur ; il la confirme ou la refuse indépendamment.
-model ProducerOrder {
-  id           String      @id @default(cuid())
-  orderId      String
-  order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  producerId   String
-  producer     Producer    @relation(fields: [producerId], references: [id], onDelete: Cascade)
-  status       OrderStatus @default(PENDING)
-  /// Date de retrait « AAAA-MM-JJ » (heure de Paris).
-  pickupDate   String
-  startMinutes Int
-  endMinutes   Int
-  /// null = retrait chez le producteur.
-  relayPointId String?
-  relayPoint   RelayPoint? @relation(fields: [relayPointId], references: [id], onDelete: SetNull)
-  customerNote String      @default("")
-  /// Message du producteur au client (motif de refus, précisions…).
-  producerNote String      @default("")
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  items        OrderItem[]
-
-  @@index([producerId, status])
-  @@index([orderId])
-}
-
-/// Ligne de commande. Nom, unité et prix sont copiés au moment de la commande.
-model OrderItem {
-  id              String        @id @default(cuid())
-  producerOrderId String
-  producerOrder   ProducerOrder @relation(fields: [producerOrderId], references: [id], onDelete: Cascade)
-  productId       String?
-  product         Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
-  name            String
-  unit            String
-  priceCents      Int?
-  quantity        Int
+  @@index([placeId, createdAt])
 }

@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import type { ContactMessage } from "@prisma/client";
-import { deleteMessage, setMessageRead } from "@/app/actions/producer";
+import { deleteMessage, setMessageRead } from "@/app/actions/places";
 
 export function MessageList({ messages }: { messages: ContactMessage[] }) {
   const [pending, startTransition] = useTransition();

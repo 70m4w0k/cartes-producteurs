@@ -4,8 +4,8 @@ import { useActionState } from "react";
 import { sendContactMessage } from "@/app/actions/contact";
 import type { FormState } from "@/lib/validation";
 
-export function ContactForm({ producerId }: { producerId: string }) {
-  const [state, action, pending] = useActionState<FormState, FormData>(sendContactMessage.bind(null, producerId), {});
+export function ContactForm({ placeId }: { placeId: string }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(sendContactMessage.bind(null, placeId), {});
 
   if (state.ok) return <p className="rounded-lg bg-emerald-50 p-4 text-emerald-800">{state.ok}</p>;
 
@@ -23,14 +23,14 @@ export function ContactForm({ producerId }: { producerId: string }) {
       </div>
       <label className="block text-sm">
         Message
-        <textarea name="body" required rows={4} className="field mt-1" placeholder="Bonjour, je souhaiterais réserver…" />
+        <textarea name="body" required rows={4} className="field mt-1" placeholder="Bonjour, je voudrais savoir…" />
       </label>
       {/* Champ piège anti-robots, invisible pour les humains. */}
       <input name="website" tabIndex={-1} autoComplete="off" className="hidden" aria-hidden />
       {state.error && <p className="text-sm text-red-700">{state.error}</p>}
       <button className="btn" disabled={pending}>{pending ? "Envoi…" : "Envoyer"}</button>
       <p className="text-xs text-stone-500">
-        Vos coordonnées sont transmises uniquement à ce producteur pour qu&apos;il puisse vous répondre.
+        Vos coordonnées sont transmises uniquement à ce lieu pour qu&apos;on puisse vous répondre.
       </p>
     </form>
   );

@@ -1,152 +1,298 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import type { Category } from "@prisma/client";
-import { CATEGORY_ICONS, CATEGORY_LABELS } from "@/lib/labels";
-import type { PublicProducer } from "@/lib/privacy";
-import type { ListedProducer, PublicRelayPoint } from "@/lib/queries";
-import { StockBadge } from "./StockBadge";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Occurrence } from "@/lib/agenda";
+import { KINDS, KIND_ORDER, SUBCATEGORIES, subcategoriesOf, subIcon, subLabel, type ListingKind } from "@/lib/categories";
+import { COMMUNE_NAMES } from "@/lib/communes";
+import { formatDate, formatMinutes, openStatus } from "@/lib/hours";
+import { LEVEL_LABELS } from "@/lib/labels";
+import type { PublicEvent, PublicPlace } from "@/lib/privacy";
+import { communePoint, countFilters, DEFAULT_FILTERS, distanceKm, inSeason, search, WHEN_LABELS, type Filters, type When } from "@/lib/search";
+import { LazyExploreMap } from "./LazyMap";
+import type { MapMarker } from "./ExploreMap";
 
-const ProducerMap = dynamic(() => import("./ProducerMap"), {
-  ssr: false,
-  loading: () => <div className="flex h-full items-center justify-center bg-stone-100 text-stone-500">Chargement de la carte…</div>,
-});
+type Props = { places: PublicPlace[]; events: PublicEvent[] };
 
-const CATEGORIES = Object.keys(CATEGORY_LABELS) as Category[];
+const RADII = [0, 2, 5, 10, 20];
 
-function normalize(s: string) {
-  return s.normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+/** Les filtres sont dans l'adresse de la page : une recherche se partage par simple lien. */
+function filtersFromParams(sp: URLSearchParams): Filters {
+  const type = sp.get("type");
+  return {
+    ...DEFAULT_FILTERS,
+    q: sp.get("q") ?? "",
+    kind: type && type in KINDS ? (type as ListingKind) : "ALL",
+    subs: (sp.get("cat") ?? "").split(",").filter((s) => s in SUBCATEGORIES),
+    commune: COMMUNE_NAMES.includes(sp.get("commune") as never) ? sp.get("commune")! : "",
+    radiusKm: RADII.includes(Number(sp.get("rayon"))) ? Number(sp.get("rayon")) : 0,
+    when: (sp.get("quand") as When) in WHEN_LABELS ? (sp.get("quand") as When) : "any",
+    from: sp.get("du") ?? "",
+    to: sp.get("au") ?? "",
+    openNow: sp.get("ouvert") === "1",
+    showOutOfSeason: sp.get("horsaison") === "1",
+  };
 }
 
-function hasAvailableProduct(p: PublicProducer) {
-  return p.products.some((pr) => pr.stockStatus === "AVAILABLE" || pr.stockStatus === "LOW");
+function filtersToQuery(f: Filters) {
+  const sp = new URLSearchParams();
+  if (f.q) sp.set("q", f.q);
+  if (f.kind !== "ALL") sp.set("type", f.kind);
+  if (f.subs.length) sp.set("cat", f.subs.join(","));
+  if (f.commune) sp.set("commune", f.commune);
+  if (f.commune && f.radiusKm) sp.set("rayon", String(f.radiusKm));
+  if (f.when !== "any") sp.set("quand", f.when);
+  if (f.when === "custom") { if (f.from) sp.set("du", f.from); if (f.to) sp.set("au", f.to); }
+  if (f.openNow) sp.set("ouvert", "1");
+  if (f.showOutOfSeason && f.when !== "any") sp.set("horsaison", "1");
+  const s = sp.toString();
+  return s ? `?${s}` : "";
 }
 
-export default function Explorer({ producers, relayPoints }: { producers: ListedProducer[]; relayPoints: PublicRelayPoint[] }) {
-  const [categories, setCategories] = useState<Set<Category>>(new Set());
-  const [query, setQuery] = useState("");
-  const [onlyAvailable, setOnlyAvailable] = useState(false);
-  const [showRelays, setShowRelays] = useState(true);
-  const [onlyOrderable, setOnlyOrderable] = useState(false);
-  const [focus, setFocus] = useState<{ lat: number; lng: number } | null>(null);
+type Row =
+  | { type: "occ"; key: string; occ: Occurrence; href: string; markerId: string }
+  | { type: "place"; key: string; place: PublicPlace; href: string; markerId: string };
 
-  const filtered = useMemo(() => {
-    const q = normalize(query.trim());
-    return producers.filter((p) => {
-      if (categories.size && !categories.has(p.category)) return false;
-      if (onlyAvailable && (p.closed || !hasAvailableProduct(p))) return false;
-      if (onlyOrderable && !p.acceptsOrders) return false;
-      if (!q) return true;
-      const haystack = [p.displayName, p.description, p.commune, CATEGORY_LABELS[p.category], ...p.products.map((pr) => pr.name)].join(" ");
-      return normalize(haystack).includes(q);
-    });
-  }, [producers, categories, query, onlyAvailable, onlyOrderable]);
+const occHref = (o: Occurrence) => (o.source === "event" ? `/evenements/${o.refId}` : `/lieux/${o.refId}`);
 
-  const toggleCategory = (c: Category) =>
-    setCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(c)) next.delete(c);
-      else next.add(c);
-      return next;
+export default function Explorer({ places, events }: Props) {
+  const sp = useSearchParams();
+  const router = useRouter();
+  const [f, setF] = useState<Filters>(() => filtersFromParams(new URLSearchParams(sp.toString())));
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [mobileView, setMobileView] = useState<"list" | "map">("list");
+  const [hover, setHover] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Les liens du menu (Agenda, Acheter local) changent l'adresse : on suit.
+  const spKey = sp.toString();
+  useEffect(() => { setF(filtersFromParams(new URLSearchParams(spKey))); }, [spKey]);
+
+  const update = (patch: Partial<Filters>) => {
+    const next = { ...f, ...patch };
+    setF(next);
+    router.replace(`/${filtersToQuery(next)}`, { scroll: false });
+  };
+
+  const result = useMemo(() => search(places, events, f), [places, events, f]);
+  const ref = f.commune ? communePoint(f.commune) : null;
+
+  const counts: Record<ListingKind, number> = {
+    EVENEMENT: result.occurrences.length,
+    ACTIVITE: result.places.ACTIVITE.length,
+    PRODUCTEUR: result.places.PRODUCTEUR.length,
+    COMMERCE: result.places.COMMERCE.length,
+    LOCAL: result.places.LOCAL.length,
+  };
+  const total = KIND_ORDER.reduce((s, k) => s + counts[k], 0);
+
+  const rowsOf = (k: ListingKind): Row[] =>
+    k === "EVENEMENT"
+      ? result.occurrences.map((o) => ({ type: "occ", key: o.key, occ: o, href: occHref(o), markerId: o.refId }))
+      : result.places[k].map((p) => ({ type: "place", key: p.id, place: p, href: `/lieux/${p.id}`, markerId: p.id }));
+  const visibleRows = f.kind === "ALL" ? KIND_ORDER.flatMap(rowsOf) : rowsOf(f.kind);
+
+  const markers: MapMarker[] = useMemo(() => {
+    const seen = new Map<string, MapMarker>();
+    for (const r of visibleRows) {
+      if (seen.has(r.markerId)) continue;
+      if (r.type === "occ") {
+        const o = r.occ;
+        const isMarket = o.source === "market";
+        seen.set(r.markerId, {
+          id: r.markerId, href: r.href, lat: o.location.lat, lng: o.location.lng, radiusM: 0, icon: subIcon(o.subcategory),
+          color: isMarket ? KINDS.LOCAL.color : KINDS.EVENEMENT.color, title: o.title,
+          subtitle: `${formatDate(o.date, "short")} · ${formatMinutes(o.startMinutes)} – ${formatMinutes(o.endMinutes)} · ${o.commune}`,
+        });
+      } else {
+        const p = r.place;
+        seen.set(r.markerId, {
+          id: p.id, href: r.href, lat: p.location.lat, lng: p.location.lng, radiusM: p.location.radiusM, icon: subIcon(p.subcategory),
+          color: KINDS[p.kind].color, title: p.name, subtitle: `${subLabel(p.subcategory)} · ${p.commune}`, muted: p.closed,
+        });
+      }
+    }
+    return [...seen.values()];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result, f.kind]);
+
+  // Un clic sur une épingle fait défiler la liste jusqu'au résultat correspondant.
+  useEffect(() => {
+    if (!selected) return;
+    listRef.current?.querySelector(`[data-marker="${CSS.escape(selected)}"]`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [selected]);
+
+  const circle = f.commune && f.radiusKm && ref ? { ...ref, km: f.radiusKm } : null;
+  const activeCount = countFilters(f);
+
+  const pills: { label: string; clear: Partial<Filters> }[] = [];
+  f.subs.forEach((s) => pills.push({ label: `${subIcon(s)} ${subLabel(s)}`, clear: { subs: f.subs.filter((x) => x !== s) } }));
+  if (f.commune) pills.push({ label: f.radiusKm ? `📍 ${f.commune} + ${f.radiusKm} km` : `📍 ${f.commune}`, clear: { commune: "", radiusKm: 0 } });
+  if (f.when !== "any") pills.push({ label: `🗓️ ${f.when === "custom" && f.from ? `${formatDate(result.window.from, "short")} → ${formatDate(result.window.to, "short")}` : WHEN_LABELS[f.when]}`, clear: { when: "any", from: "", to: "" } });
+  if (f.openNow) pills.push({ label: "🕒 Ouvert maintenant", clear: { openNow: false } });
+
+  const renderRow = (r: Row) => {
+    const active = hover === r.markerId || selected === r.markerId;
+    if (r.type === "occ") {
+      const o = r.occ;
+      return (
+        <Link key={r.key} href={r.href} data-marker={r.markerId} onMouseEnter={() => setHover(r.markerId)} onMouseLeave={() => setHover(null)}
+          className={`result ${active ? "is-active" : ""}`} style={{ ["--tc" as string]: o.source === "market" ? KINDS.LOCAL.color : KINDS.EVENEMENT.color }}>
+          <span className="result-ic" aria-hidden>{subIcon(o.subcategory)}</span>
+          <span className="min-w-0">
+            <span className="result-title">{o.title}</span>
+            <span className="result-meta">
+              <b className="first-letter:uppercase">{formatDate(o.date, "short")}, {formatMinutes(o.startMinutes)} – {formatMinutes(o.endMinutes)}</b>
+              <span>{o.commune}</span>
+              {o.price && <span>{o.price}</span>}
+              {ref && <span>{distanceKm(ref, o.location).toFixed(1)} km</span>}
+            </span>
+            {o.tagline && <span className="result-desc">{o.tagline}</span>}
+          </span>
+        </Link>
+      );
+    }
+    const p = r.place;
+    const status = p.closed ? { open: false, label: "Fermé temporairement" } : openStatus(p.hours);
+    const outOfSeason = !inSeason(p.season, result.window);
+    return (
+      <Link key={r.key} href={r.href} data-marker={r.markerId} onMouseEnter={() => setHover(r.markerId)} onMouseLeave={() => setHover(null)}
+        className={`result ${active ? "is-active" : ""}`} style={{ ["--tc" as string]: KINDS[p.kind].color }}>
+        <span className="result-ic" aria-hidden>{subIcon(p.subcategory)}</span>
+        <span className="min-w-0">
+          <span className="result-title">{p.name}</span>
+          <span className="result-meta">
+            <span>{subLabel(p.subcategory)}</span>
+            <span>{p.commune}</span>
+            {p.facts?.duration && <span>{p.facts.duration}</span>}
+            {p.facts?.level && <span>{LEVEL_LABELS[p.facts.level]}</span>}
+            {ref && <span>{distanceKm(ref, p.location).toFixed(1)} km</span>}
+            {outOfSeason && <span className="badge-off">Hors saison</span>}
+          </span>
+          {p.tagline && <span className="result-desc">{p.tagline}</span>}
+          {status && <span className={status.open ? "badge-ok" : "badge-off"}>{status.label}</span>}
+        </span>
+      </Link>
+    );
+  };
+
+  let list: React.ReactNode;
+  if (total === 0 || (f.kind !== "ALL" && counts[f.kind] === 0)) {
+    list = <p className="rounded-xl border border-dashed border-stone-300 p-6 text-center text-stone-500">Aucun résultat. Élargissez la zone, les dates ou retirez un filtre.</p>;
+  } else if (f.kind === "ALL") {
+    list = KIND_ORDER.filter((k) => counts[k]).map((k) => (
+      <section key={k} className="space-y-2">
+        <div className="flex items-baseline justify-between gap-2 pt-2">
+          <h2 className="font-display text-lg font-bold" style={{ color: KINDS[k].color }}>{KINDS[k].icon} {KINDS[k].label}</h2>
+          {counts[k] > 4 && <button type="button" className="btn-ghost text-sm" onClick={() => update({ kind: k, subs: [] })}>Tout voir ({counts[k]})</button>}
+        </div>
+        {rowsOf(k).slice(0, 4).map(renderRow)}
+      </section>
+    ));
+  } else if (f.kind === "EVENEMENT") {
+    let last = "";
+    list = rowsOf("EVENEMENT").map((r) => {
+      const day = r.type === "occ" ? r.occ.date : "";
+      const head = day !== last ? <p key={`d-${day}`} className="pt-2 font-display font-bold first-letter:uppercase">{formatDate(day)}</p> : null;
+      last = day;
+      return [head, renderRow(r)];
     });
+  } else list = visibleRows.map(renderRow);
 
   return (
-    <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 py-4 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-      <section className="order-2 space-y-3 md:order-1">
-        <input
-          type="search"
-          className="field"
-          placeholder="Rechercher : miel, tomme, Orlu…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label="Rechercher un producteur ou un produit"
-        />
-        <div className="flex flex-wrap gap-2">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => toggleCategory(c)}
-              aria-pressed={categories.has(c)}
-              className={`rounded-full border px-3 py-1 text-sm ${
-                categories.has(c) ? "border-moss-700 bg-moss-700 text-white" : "border-stone-300 bg-white"
-              }`}
-            >
-              {CATEGORY_ICONS[c]} {CATEGORY_LABELS[c]}
+    <div className="explorer" data-mobile={mobileView}>
+      <div className="explorer-bar">
+        <form role="search" className="flex gap-2" onSubmit={(e) => e.preventDefault()}>
+          <input type="search" className="field text-base" placeholder="Rechercher : randonnée, fromage, marché, Orlu…" value={f.q}
+            onChange={(e) => update({ q: e.target.value })} aria-label="Rechercher" />
+          <button type="button" className={`btn-ghost whitespace-nowrap ${filtersOpen ? "is-on" : ""}`} aria-expanded={filtersOpen} aria-controls="filters" onClick={() => setFiltersOpen((o) => !o)}>
+            ⚙️ Filtres{activeCount > 0 && <span className="count">{activeCount}</span>}
+          </button>
+        </form>
+        <div className="tabs" role="tablist" aria-label="Type">
+          <button role="tab" aria-selected={f.kind === "ALL"} onClick={() => update({ kind: "ALL", subs: [] })}>Tout <span className="n">{total}</span></button>
+          {KIND_ORDER.map((k) => (
+            <button key={k} role="tab" aria-selected={f.kind === k} onClick={() => update({ kind: k, subs: [] })}>
+              {KINDS[k].icon} {KINDS[k].label} <span className="n">{counts[k]}</span>
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap gap-4 text-sm">
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={onlyAvailable} onChange={(e) => setOnlyAvailable(e.target.checked)} />
-            Produits disponibles uniquement
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={onlyOrderable} onChange={(e) => setOnlyOrderable(e.target.checked)} />
-            Commande en ligne 🧺
-          </label>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={showRelays} onChange={(e) => setShowRelays(e.target.checked)} />
-            Afficher les points relais 📦
-          </label>
-        </div>
-
-        <p className="text-sm text-stone-500">
-          {filtered.length} producteur{filtered.length > 1 ? "s" : ""}
-        </p>
-
-        <ul className="space-y-3">
-          {filtered.map((p) => (
-            <li key={p.id} className="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
-              <div className="flex items-start gap-3">
-                <span className="text-2xl" aria-hidden>{CATEGORY_ICONS[p.category]}</span>
-                <div className="min-w-0 flex-1">
-                  <Link href={`/producteurs/${p.id}`} className="font-semibold hover:underline">
-                    {p.displayName}
-                  </Link>
-                  <p className="text-sm text-stone-600">
-                    {CATEGORY_LABELS[p.category]} · {p.commune}
-                    {p.acceptsOrders && <span className="ml-2 rounded-full bg-moss-100 px-2 py-0.5 text-xs font-medium text-moss-800">🧺 Commande en ligne</span>}
-                  </p>
-                  {p.closed && (
-                    <p className="mt-1 text-sm font-medium text-red-700">Fermé temporairement{p.closedNote && ` — ${p.closedNote}`}</p>
-                  )}
-                  {p.products.length > 0 && (
-                    <ul className="mt-2 space-y-1">
-                      {p.products.slice(0, 4).map((pr) => (
-                        <li key={pr.id} className="flex items-center justify-between gap-2 text-sm">
-                          <span className="truncate">{pr.name}</span>
-                          <StockBadge status={pr.stockStatus} />
-                        </li>
-                      ))}
-                      {p.products.length > 4 && <li className="text-xs text-stone-500">+ {p.products.length - 4} autres produits</li>}
-                    </ul>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="btn-ghost text-sm"
-                  onClick={() => setFocus({ lat: p.location.lat, lng: p.location.lng })}
-                  aria-label={`Voir ${p.displayName} sur la carte`}
-                >
-                  📍
-                </button>
+        {filtersOpen && (
+          <div id="filters" className="filters-panel">
+            {f.kind !== "ALL" && (
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Catégories">
+                {subcategoriesOf(f.kind).map(([id, s]) => (
+                  <button key={id} type="button" className="chip" aria-pressed={f.subs.includes(id)}
+                    onClick={() => update({ subs: f.subs.includes(id) ? f.subs.filter((x) => x !== id) : [...f.subs, id] })}>
+                    {s.icon} {s.label}
+                  </button>
+                ))}
               </div>
-            </li>
-          ))}
-          {filtered.length === 0 && (
-            <li className="rounded-xl border border-dashed border-stone-300 p-6 text-center text-stone-500">
-              Aucun producteur ne correspond à votre recherche.
-            </li>
-          )}
-        </ul>
-      </section>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm">Où
+                <select className="field mt-1" value={f.commune} onChange={(e) => update({ commune: e.target.value, radiusKm: e.target.value ? f.radiusKm || 5 : 0 })}>
+                  <option value="">Toute la vallée</option>
+                  {COMMUNE_NAMES.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </label>
+              <label className="block text-sm">Rayon
+                <select className="field mt-1" value={f.radiusKm} disabled={!f.commune} onChange={(e) => update({ radiusKm: Number(e.target.value) })}>
+                  {RADII.map((r) => <option key={r} value={r}>{r ? `${r} km` : "Commune seule"}</option>)}
+                </select>
+              </label>
+              <label className="block text-sm">Quand
+                <select className="field mt-1" value={f.when} onChange={(e) => update({ when: e.target.value as When })}>
+                  {Object.entries(WHEN_LABELS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 self-end pb-2 text-sm">
+                <input type="checkbox" checked={f.openNow} onChange={(e) => update({ openNow: e.target.checked })} /> Ouvert maintenant
+              </label>
+              {f.when === "custom" && (
+                <>
+                  <label className="block text-sm">Du<input type="date" className="field mt-1" value={f.from || result.window.from} onChange={(e) => update({ from: e.target.value })} /></label>
+                  <label className="block text-sm">Au<input type="date" className="field mt-1" value={f.to || result.window.to} onChange={(e) => update({ to: e.target.value })} /></label>
+                </>
+              )}
+            </div>
+            <div className="flex justify-between gap-2">
+              <button type="button" className="text-sm underline" onClick={() => update({ ...DEFAULT_FILTERS, q: f.q, kind: f.kind })}>Réinitialiser les filtres</button>
+              <button type="button" className="btn" onClick={() => setFiltersOpen(false)}>Voir {f.kind === "ALL" ? total : counts[f.kind]} résultats</button>
+            </div>
+          </div>
+        )}
+        {pills.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {pills.map((p) => (
+              <button key={p.label} type="button" className="pill" onClick={() => update(p.clear)} aria-label={`Retirer le filtre ${p.label}`}>{p.label} ✕</button>
+            ))}
+          </div>
+        )}
+      </div>
 
-      <section className="order-1 h-[45vh] overflow-hidden rounded-xl border border-stone-200 md:sticky md:top-4 md:order-2 md:h-[calc(100vh-7rem)]">
-        <ProducerMap producers={filtered} relayPoints={showRelays ? relayPoints : []} focus={focus} />
-      </section>
+      <div className="explorer-map" aria-label="Carte des résultats">
+        <LazyExploreMap markers={markers} circle={circle} highlightId={hover ?? selected} onMarkerClick={(id) => { setSelected(id); setMobileView("list"); }} />
+      </div>
+
+      <div className="explorer-list" ref={listRef}>
+        <p className="text-sm text-stone-500">
+          {f.kind === "ALL" ? total : counts[f.kind]} résultat{(f.kind === "ALL" ? total : counts[f.kind]) > 1 ? "s" : ""} · la carte se recadre sur la recherche
+        </p>
+        {result.hiddenOutOfSeason > 0 && (
+          <p className="rounded-lg bg-stone-100 p-2 text-sm">
+            {result.hiddenOutOfSeason} activité{result.hiddenOutOfSeason > 1 ? "s" : ""} hors saison masquée{result.hiddenOutOfSeason > 1 ? "s" : ""} ·{" "}
+            <button type="button" className="underline" onClick={() => update({ showOutOfSeason: true })}>Afficher</button>
+          </p>
+        )}
+        {list}
+      </div>
+
+      <button type="button" className="explorer-fab btn" onClick={() => setMobileView((v) => (v === "list" ? "map" : "list"))}>
+        {mobileView === "list" ? `🗺️ Carte (${markers.length})` : "☰ Liste"}
+      </button>
     </div>
   );
 }

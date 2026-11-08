@@ -2,7 +2,7 @@
 
 import { useActionState, useTransition } from "react";
 import type { Product, StockStatus } from "@prisma/client";
-import { createProduct, deleteProduct, setStockStatus, updateProduct } from "@/app/actions/producer";
+import { createProduct, deleteProduct, setStockStatus, updateProduct } from "@/app/actions/places";
 import { formatPrice, STOCK_LABELS, STOCK_STYLES } from "@/lib/labels";
 import type { FormState } from "@/lib/validation";
 
@@ -30,8 +30,8 @@ function ProductFields({ product }: { product?: Product }) {
   );
 }
 
-function NewProductForm() {
-  const [state, action, pending] = useActionState<FormState, FormData>(createProduct, {});
+function NewProductForm({ placeId }: { placeId: string }) {
+  const [state, action, pending] = useActionState<FormState, FormData>(createProduct.bind(null, placeId), {});
   return (
     <details className="rounded-xl border border-dashed border-stone-300 bg-white p-4">
       <summary className="cursor-pointer font-semibold">➕ Ajouter un produit</summary>
@@ -97,14 +97,14 @@ function ProductRow({ product }: { product: Product }) {
   );
 }
 
-export function ProductManager({ products }: { products: Product[] }) {
+export function ProductManager({ placeId, products }: { placeId: string; products: Product[] }) {
   return (
     <div className="space-y-3">
       {products.length === 0 && <p className="text-stone-500">Aucun produit pour l&apos;instant.</p>}
       <ul className="space-y-3">
         {products.map((p) => <ProductRow key={p.id} product={p} />)}
       </ul>
-      <NewProductForm />
+      <NewProductForm placeId={placeId} />
     </div>
   );
 }

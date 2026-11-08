@@ -9,7 +9,7 @@ import { firstError, loginSchema, signupSchema, type FormState } from "@/lib/val
 export async function signup(_: FormState, form: FormData): Promise<FormState> {
   const parsed = signupSchema.safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: firstError(parsed.error) };
-  const { email, password, name, category, commune } = parsed.data;
+  const { email, password, name, kind, subcategory, commune } = parsed.data;
 
   if (await db.user.findUnique({ where: { email } })) {
     return { error: "Un compte existe déjà avec cet e-mail." };
@@ -19,7 +19,8 @@ export async function signup(_: FormState, form: FormData): Promise<FormState> {
     data: {
       email,
       passwordHash: await bcrypt.hash(password, 12),
-      producer: { create: { name, category, commune } },
+      // Par défaut, un producteur est « discret » : il choisira ensuite ce qu'il affiche.
+      places: { create: { name, kind, subcategory, commune, visibility: kind === "PRODUCTEUR" ? "APPROXIMATE" : "PUBLIC" } },
     },
   });
   await createSession({ userId: user.id, role: user.role });
